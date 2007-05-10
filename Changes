@@ -1,0 +1,17 @@
+=head1 NAME
+    
+Changes - List of significant changes to GoferTransport-http
+    
+As of $Date: 2007-03-23 13:48:54 +0000 (Fri, 23 Mar 2007) $
+
+$Revision: 9495 $
+
+=cut
+
+XXX default http timeout should be infinite
+    
+=head2 Changes in GoferTransport-http 1.0.0 (svn rev XX),  XXX
+
+  Initial release.
+
+=cut
