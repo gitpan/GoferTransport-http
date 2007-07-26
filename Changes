@@ -4,13 +4,17 @@ Changes - List of significant changes to GoferTransport-http
     
 As of $Date: 2007-03-23 13:48:54 +0000 (Fri, 23 Mar 2007) $
 
-$Revision: 9495 $
+$Revision: 9805 $
 
 =cut
 
 XXX default http timeout should be infinite
-    
-=head2 Changes in GoferTransport-http 1.0.0 (svn rev XX),  XXX
+
+=head2 Changes in 1.011 (svn rev 9805), 26th July
+
+  Fix for mod_perl2
+
+=head2 Changes in 1.0.0 (svn rev XX),  XXX
 
   Initial release.
 

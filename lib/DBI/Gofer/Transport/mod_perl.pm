@@ -3,7 +3,7 @@ package DBI::Gofer::Transport::mod_perl;
 use strict;
 use warnings;
 
-our $VERSION = sprintf("0.%06d", q$Revision: 9533 $ =~ /(\d+)/o);
+our $VERSION = sprintf("0.%06d", q$Revision: 9805 $ =~ /(\d+)/o);
 
 use Sys::Hostname qw(hostname);
 use List::Util qw(min max sum);
@@ -14,18 +14,20 @@ use DBI::Gofer::Execute;
 use constant MP2 => ( exists $ENV{MOD_PERL_API_VERSION} and $ENV{MOD_PERL_API_VERSION} >= 2 );
 BEGIN {
   if (MP2) {
-      warn "USE WITH mod_perl2 NOT RECENTLY TESTED"; # probably broke, probably easy to fix
     require Apache2::RequestIO;
     require Apache2::RequestRec;
     require Apache2::RequestUtil;
     require Apache2::Const;
-    Apache2::Const->import(-compile => qw(OK SERVER_ERROR));
+    Apache2::Const->import(qw(OK SERVER_ERROR));
+    require Apache2::Util;
+    Apache2::Util->import(qw(escape_html));
   } else {
     require Apache::Constants;
     Apache::Constants->import(qw(OK SERVER_ERROR));
+    require Apache::Util;
+    Apache::Util->import(qw(escape_html));
   }
 }
-use Apache::Util qw(escape_html);
 
 use base qw(DBI::Gofer::Transport::Base);
 
