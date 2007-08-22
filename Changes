@@ -4,13 +4,19 @@ Changes - List of significant changes to GoferTransport-http
     
 As of $Date: 2007-03-23 13:48:54 +0000 (Fri, 23 Mar 2007) $
 
-$Revision: 9805 $
+$Revision: 9867 $
 
 =cut
 
-XXX default http timeout should be infinite
 
-=head2 Changes in 1.011 (svn rev 9805), 26th July
+=head2 Changes in 1.012 (svn rev 9867), 22nd August 2007
+
+  Fixed for mod_perl2, better.
+  Support GET requests with ?req=<base64 encoded Storable request>
+  Added 'replay' urls to the gofer status reports.
+  Added a little more support for multiple serializations.
+
+=head2 Changes in 1.011 (svn rev 9805), 26th July 2007
 
   Fix for mod_perl2
 

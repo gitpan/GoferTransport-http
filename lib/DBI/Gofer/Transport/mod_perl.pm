@@ -3,7 +3,7 @@ package DBI::Gofer::Transport::mod_perl;
 use strict;
 use warnings;
 
-our $VERSION = sprintf("0.%06d", q$Revision: 9805 $ =~ /(\d+)/o);
+our $VERSION = sprintf("0.%06d", q$Revision: 9848 $ =~ /(\d+)/o);
 
 use Sys::Hostname qw(hostname);
 use List::Util qw(min max sum);
@@ -14,18 +14,31 @@ use DBI::Gofer::Execute;
 use constant MP2 => ( exists $ENV{MOD_PERL_API_VERSION} and $ENV{MOD_PERL_API_VERSION} >= 2 );
 BEGIN {
   if (MP2) {
+    require Apache2::Connection;
     require Apache2::RequestIO;
     require Apache2::RequestRec;
     require Apache2::RequestUtil;
+    require Apache2::Response;
     require Apache2::Const;
     Apache2::Const->import(qw(OK SERVER_ERROR));
-    require Apache2::Util;
-    Apache2::Util->import(qw(escape_html));
-  } else {
+    require APR::Base64;
+    *encode_base64 = \&APR::Base64::encode;
+    *decode_base64 = \&APR::Base64::decode;
+    *escape_html = sub {
+	my $s = shift;
+	$s =~ s/&/&amp;/g;
+	$s =~ s/</&lt;/g;
+	$s =~ s/>/&gt;/g;
+	return $s;
+    }
+  }
+  else {
     require Apache::Constants;
     Apache::Constants->import(qw(OK SERVER_ERROR));
     require Apache::Util;
     Apache::Util->import(qw(escape_html));
+    require MIME::Base64;
+    MIME::Base64->import(qw(encode_base64 decode_base64));
   }
 }
 
@@ -36,6 +49,8 @@ my $transport = __PACKAGE__->new();
 my %executor_configs = ( default => { } );
 my %executor_cache;
 
+my $datadumper_serializer = DBI::Gofer::Serializer::DataDumper->new;
+
 _install_apache_status_menu_items(
     DBI_gofer => [ 'DBI Gofer', \&_apache_status_dbi_gofer ],
 );
@@ -44,35 +59,59 @@ _install_apache_status_menu_items(
 sub handler : method {
     my $self = shift;
     my $r = shift;
+    my $headers_in = $r->headers_in;
 
     eval {
         my $time_received = dbi_time();
         my $executor = $self->executor_for_apache_request($r);
 
-        $r->read(my $frozen_request, $r->headers_in->{'Content-length'});
+        my $request_content_length = $headers_in->{'Content-Length'};
+	my $frozen_request;
+        my $response_content_type = 'application/x-perl-gofer-response-binary';
+	my $response_serializer;
+	# should probably contol flow via method: GET vs POST
+	my $of = "";
+	if (!$request_content_length) {
+	    my $args = $r->args;
+	    my %args = map { (split('=',$_,2))[0,1] } split /[&;]/, $args, -1;
+	    my $req = $args{req} or die "No req argument or Content-Length ($args)\n";
+	    $frozen_request = decode_base64($req);
+	    if ($args{_dd}) { # temp hack
+	    $response_serializer = $datadumper_serializer;
+	    $response_content_type = 'text/plain';
+	    }
+	}
+	else {
+	    my $content_type = $headers_in->{'Content-Type'};
+	    die "Unsupported gofer Content-Type"
+		unless $content_type eq 'application/x-perl-gofer-request-binary';
+	    $r->read($frozen_request, $request_content_length);
+	}
         my $request = $transport->thaw_request($frozen_request);
 
         my $response = $executor->execute_request( $request );
 
-        my $frozen_response = $transport->freeze_response($response);
+        my $frozen_response = $transport->freeze_response($response, $response_serializer);
 
+        $r->content_type($response_content_type);
         # setup http headers
         # See http://perl.apache.org/docs/general/correct_headers/correct_headers.html
-
         # provide Content-Length for KeepAlive so it works if people want it
-        $r->header_out('Content-Length', length($frozen_response));
-        $r->send_http_header('application/x-perl-gofer-response-binary');
+        $r->headers_out->{'Content-Length'} = length($frozen_response);
 
-        # using a reference here avoids duplicating the (possibly large) frozen response.
-        # http://perl.apache.org/docs/1.0/guide/porting.html#Apache__print___and_CORE__print__
-        $r->print(\$frozen_response);
+        $r->print($frozen_response);
 
         $executor->update_stats($request, $response, $frozen_request, $frozen_response, $time_received);
     };
     if ($@) {
+        # for errors at this level we don't send a serialized Gofer Response 
+        # just a plain error message and SERVER_ERROR (500) status
         chomp(my $error = $@);
-        warn $error;
-        $r->custom_response(SERVER_ERROR, "$error, version $VERSION (DBI $DBI::VERSION) on ".hostname());
+        $error .= sprintf " in %s request from %s",
+		$headers_in->{'Content-Type'}||'', $r->connection->remote_ip;
+        warn "$error\n";
+        $r->custom_response(SERVER_ERROR, sprintf "%s. (%s %s, DBI %s, on %s)",
+            $error, __PACKAGE__, $VERSION, $DBI::VERSION, hostname());
         return SERVER_ERROR;
     }
 
@@ -185,31 +224,51 @@ sub _apache_status_dbi_gofer {
         "<b>DBI::Gofer::Transport::mod_perl $VERSION</b><p>",
     );
     my $time_now = dbi_time();
+
     my $path_info = $r->path_info;
     # workaround TransHandler being disabled
     $path_info = $url if not defined $path_info;
     # remove leading perl-status, if present (some versions do this, or else no path_info above)
     $path_info =~ s!^/perl-status!!;
+
     # hack to enable simple actions to be invoked via the status interface
     my $action = ($path_info =~ s/:(\w+)$//) ? $1 : undef;
+
     if ($path_info) {
+
         my $executor = $executor_cache{$path_info}
             or return [ "No Gofer executor found for '$path_info'" ];
+
+        my $stats = $executor->{stats} ||= {};
+        my $recent_requests = $stats->{recent_requests};
+
         if ($action) {
+		# change to hash of code refs and add links to the actions into the output
             if ($action eq 'reset_stats') {
                 $executor->{stats} = { _reset_stats_at => localtime(time) };
             }
+            elsif ($action eq 'recent_as_urls') {
+		my $host = $r->get_server_name;
+		my $port = $r->get_server_port;
+		@s = ();
+		for my $rr (@$recent_requests) {
+		    my $b64_request = encode_base64($rr->{request});
+		    push @s, "http://$host:$port$path_info?req=$b64_request\n";
+		}
+		return \@s;
+	    }
             else {
                 return [ "Unknown action '$action' ignored for $path_info" ];
             }
         }
-        my $stats = $executor->{stats} ||= {};
-        my $recent_requests = $stats->{recent_requests};
+
         # don't Data::Dumper all the recent_requests
         local $stats->{recent_requests} = @{$stats->{recent_requests}||[]};
         push @s, escape_html( Data::Dumper::Dumper($executor) );
         push @s, "<hr>";
+
         my ($idle_total, $dur_total, $time_received_prev, $duration_prev) = (0,0,0,0);
+	my @redo_urls;
         for my $rr (@$recent_requests) {
             my $time_received = $rr->{time_received};
             my $duration = $rr->{duration};
@@ -218,6 +277,12 @@ sub _apache_status_dbi_gofer {
 
             # mark idle periods - handy when testing
             push @s, "<hr>" if $time_received_prev and $idle > 10;
+
+	    my $b64_request = encode_base64($rr->{request});
+	    push @redo_urls, "$path_info?req=$b64_request";
+	    push @s, sprintf qq{\tredo: <a href="%s?req=%s">raw</a>, <a href="%s?_dd=1&req=%s">dump</a>},
+		$path_info, $b64_request,
+		$path_info, $b64_request;
 
             my $request  = $transport->thaw_request($rr->{request});
             push @s, escape_html( $request->summary_as_text({
@@ -232,6 +297,8 @@ sub _apache_status_dbi_gofer {
                 duration => $duration,
                 size => length($rr->{response}),
             }) );
+
+            push @s, "";
 
             $idle_total += $idle;
             $dur_total  += $duration;
