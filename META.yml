@@ -1,7 +1,7 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         GoferTransport-http
-version:      1.012
+version:      1.013
 version_from: 
 installdirs:  site
 requires:
@@ -13,4 +13,4 @@ requires:
     URI:                           0
 
 distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.30
+generated_by: ExtUtils::MakeMaker version 6.17

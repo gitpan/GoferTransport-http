@@ -5,7 +5,7 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME                => 'GoferTransport-http',
     AUTHOR              => 'Tim Bunce <Tim.Bunce@pobox.com>',
-    VERSION             => '1.012',
+    VERSION             => '1.013',
     ABSTRACT            => 'HTTP transports for DBI stateless proxy driver DBD::Gofer',
     PL_FILES            => {},
     PREREQ_PM => {

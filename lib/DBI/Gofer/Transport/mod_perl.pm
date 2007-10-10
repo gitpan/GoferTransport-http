@@ -3,7 +3,7 @@ package DBI::Gofer::Transport::mod_perl;
 use strict;
 use warnings;
 
-our $VERSION = sprintf("0.%06d", q$Revision: 9848 $ =~ /(\d+)/o);
+our $VERSION = sprintf("0.%06d", q$Revision: 10064 $ =~ /(\d+)/o);
 
 use Sys::Hostname qw(hostname);
 use List::Util qw(min max sum);
@@ -72,7 +72,7 @@ sub handler : method {
 	# should probably contol flow via method: GET vs POST
 	my $of = "";
 	if (!$request_content_length) {
-	    my $args = $r->args;
+	    my $args = $r->args || '';
 	    my %args = map { (split('=',$_,2))[0,1] } split /[&;]/, $args, -1;
 	    my $req = $args{req} or die "No req argument or Content-Length ($args)\n";
 	    $frozen_request = decode_base64($req);
@@ -101,6 +101,7 @@ sub handler : method {
 
         $r->print($frozen_response);
 
+        # XXX add as cleanup handler
         $executor->update_stats($request, $response, $frozen_request, $frozen_response, $time_received);
     };
     if ($@) {
@@ -129,8 +130,9 @@ sub executor_for_apache_request {
         # get all configs for this location in sequence ('closest' last)
         my @location_configs = $r_dir_config->get('GoferConfig');
 
-        my $merged_config = $self->_merge_named_configurations( $uri, \@location_configs, 1 );
-        DBI::Gofer::Execute->new($merged_config);
+        my $merged_config = $self->_merge_named_configurations( "$uri $$", \@location_configs, 1 );
+        my $gofer_execute_class = $merged_config->{gofer_execute_class} || 'DBI::Gofer::Execute';
+        $gofer_execute_class->new($merged_config);
     }
 }
 
@@ -141,7 +143,9 @@ sub _merge_named_configurations {
 
     push @location_configs, 'default' unless @location_configs;
 
-    my $proto_config = DBI::Gofer::Execute->valid_configuration_attributes();
+    # XXX chicken-and-egg - need to move this into loop to get class from individual configs
+    my $gofer_execute_class ||= 'DBI::Gofer::Execute';
+    my $proto_config = $gofer_execute_class->valid_configuration_attributes();
 
     # merge all configs for this location in sequence, later override earlier
     my %merged_config;
@@ -152,21 +156,21 @@ sub _merge_named_configurations {
             # (don't die for 'default' unless it was explicitly requested)
             die "$tag: GoferConfig '$config_name' not defined";
         }
+        my @info;
         while ( my ($item_name, $proto_type) = each %$proto_config ) {
             next if not exists $config->{$item_name};
             my $item_value = $config->{$item_name};
             if (ref $proto_type eq 'HASH') {
                 my $merged = $merged_config{$item_name} ||= {};
-                warn "$tag: GoferConfig $config_name $item_name (@{[ %$item_value ]})\n"
-                    if $verbose && keys %$item_value;
+                push @info, "$item_name={ @{[ %$item_value ]} }" if $verbose && keys %$item_value;
                 $merged->{$_} = $item_value->{$_} for keys %$item_value;
             }
             else {
-                warn "$tag: GoferConfig $config_name $item_name: '$item_value'\n"
-                    if $verbose && defined $item_value;
+                push @info, "$item_name=$item_value" if $verbose && defined $item_value;
                 $merged_config{$item_name} = $item_value;
             }
         }
+        warn "$tag: GoferConfig $config_name: @info\n" if @info;
     }
     return \%merged_config;
 }
@@ -174,8 +178,9 @@ sub _merge_named_configurations {
 
 sub add_configurations {           # one-time setup from httpd.conf
     my ($self, $configs) = @_;
-    my $proto_config = DBI::Gofer::Execute->valid_configuration_attributes();
     while ( my ($config_name, $config) = each %$configs ) {
+        my $gofer_execute_class = $config->{gofer_execute_class} || 'DBI::Gofer::Execute';
+        my $proto_config = $gofer_execute_class->valid_configuration_attributes();
         my @bad = grep { not exists $proto_config->{$_} } keys %$config;
         die "Invalid keys in $self configuration '$config_name': @bad\n"
             if @bad;
@@ -245,7 +250,8 @@ sub _apache_status_dbi_gofer {
         if ($action) {
 		# change to hash of code refs and add links to the actions into the output
             if ($action eq 'reset_stats') {
-                $executor->{stats} = { _reset_stats_at => localtime(time) };
+                $executor->{stats} = { _reset_stats_at => scalar localtime(time) };
+                $stats = {};
             }
             elsif ($action eq 'recent_as_urls') {
 		my $host = $r->get_server_name;

@@ -1,6 +1,6 @@
 package DBD::Gofer::Transport::http;
 
-#   $Id: http.pm 9533 2007-05-09 15:32:24Z timbo $
+#   $Id: http.pm 10066 2007-10-10 11:31:30Z timbo $
 #
 #   Copyright (c) 2007, Tim Bunce, Ireland
 #
@@ -18,16 +18,24 @@ use HTTP::Request;
 use DBI 1.55;
 use base qw(DBD::Gofer::Transport::Base);
 
-our $VERSION = sprintf("0.%06d", q$Revision: 9533 $ =~ /(\d+)/o);
+# set $DBI::stderr if unset (ie for older versions of DBI)
+$DBI::stderr ||= 2_000_000_000;
+
+our $VERSION = sprintf("0.%06d", q$Revision: 10066 $ =~ /(\d+)/o);
 
 __PACKAGE__->mk_accessors(qw(
     http_req
     http_ua
 )); 
 
+my $use_retry_on_empty_response = $ENV{DBD_GOFER_RETRY_ON_EMPTY} || 0;
 
 sub transmit_request_by_transport {
     my ($self, $request) = @_;
+
+    my $retry_on_empty_response = 0;
+    $retry_on_empty_response = ($request->is_idempotent) ? 30 : 2
+	if $use_retry_on_empty_response;
 
     my $response = eval { 
         my $frozen_request = $self->freeze_request($request);
@@ -50,24 +58,45 @@ sub transmit_request_by_transport {
         };
 
         my $content = $frozen_request;
-        $http_req->header('Content-Length' => length($content)); # in bytes
+        $http_req->header('Content-Length' => do { use bytes; length($content) } );
         $http_req->content($content);
 
         # Pass request to the user agent and get a response back
+	SEND_REQUEST:
         my $res = $http_ua->request($http_req);
-
-        if (not $res->is_success) {
-            return DBI::Gofer::Response->new({
-                err    => 1, # or 100_000 + $res->status_code? DBI registry codes? XXX
-                errstr => $res->status_line,
-            }); 
-        }
 
         my $frozen_response = $res->content;
 
+        if (not $res->is_success or not $frozen_response) {
+	    my $code = $res->code;
+	    my $msg  = $res->message;
+
+	    if (!$frozen_response && $res->is_success) {
+		# fake an error status - Net::HTTP should have done this
+		# but LWP::Protocol::http calls read_response_headers with laxed=>1
+		# so old versions treat this as a valid 'HTTP/0.9' response.
+		$code = 500;
+		$msg  = "Server returned empty response";
+	    }
+
+	    if ($code == 500
+	    && $msg =~ m/^Server (closed connection without sending|returned empty response)/
+	    && $retry_on_empty_response-- >= 0
+	    ) {
+		my $msg = "$code $msg from ".$self->go_url;
+		warn "$msg ($retry_on_empty_response)\n";
+		goto SEND_REQUEST;
+	    }
+
+            return DBI::Gofer::Response->new({
+                err    => $DBI::stderr + $code,
+                errstr => "$code $msg",
+            }); 
+        }
+
         return $self->thaw_response($frozen_response);
     };
-    $response ||= DBI::Gofer::Response->new({ err => 1, errstr => $@||'(no response)' });
+    $response ||= DBI::Gofer::Response->new({ err => $DBI::stderr, errstr => $@||'(no response)' });
     return $response;
 }
 
@@ -77,6 +106,19 @@ sub receive_response_by_transport {
     # transmit_request_by_transport does all the work for this driver
     # so receive_response_by_transport should never be called
     croak "receive_response_by_transport should never be called";
+}
+
+{
+    package # hide from pause indexer
+	LWP::Protocol::http::Socket;
+
+    sub XXX_read_response_headers {
+	my $self = shift;
+	my %args = @_;
+	delete $args{laxed};
+	warn "read_response_headers";
+	return $self->SUPER::read_response_headers(%args);
+    }
 }
 
 
@@ -141,6 +183,22 @@ Waits for and returns response. Any exception is caught and returned as a respon
 This method isn't used because transmit_request_by_transport() always returns a response object.
 If called it throws an exception.
 
+=head1 ENVIRONMENT VARIABLES
+
+=head2 DBD_GOFER_RETRY_ON_EMPTY
+
+Used to workaround problems with buggy load balancers (e.g. a Juniper DX with
+standing connections enabled) which cause some requests to fail whithout ever
+reaching the gofer server.
+
+If set to 1 then empty responses will be retried. If is_idempotent() is true
+then upto 30 retries will be performed, else just 2 retries. The retries happen
+without any delay and log a warning each time.
+
+This mechanism is not recommended for non-readonly databases because there's a
+risk that the server did receive and act on the request, so retrying it would
+cause the database change to be repeated, which may cause other problems.
+
 =head1 BUGS AND LIMITATIONS
 
 There is currently no support for http authentication.
@@ -155,7 +213,7 @@ L<DBD::Gofer> and L<DBI::Gofer::Transport::mod_perl>
 
 =head1 AUTHOR
 
-Tim Bunce, L<http://www.linkedin.com/in/timbunce>
+Tim Bunce, L<http://www.tim.bunce.name>
 
 =head1 LICENCE AND COPYRIGHT
 
