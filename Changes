@@ -4,11 +4,11 @@ Changes - List of significant changes to GoferTransport-http
     
 As of $Date: 2007-03-23 13:48:54 +0000 (Fri, 23 Mar 2007) $
 
-$Revision: 10066 $
+$Revision: 10068 $
 
 =cut
 
-=head2 Changes in 1.013 (svn rev 10066), 10th October 2007
+=head2 Changes in 1.014 (svn rev 10068), 10th October 2007
 
   Added DBD_GOFER_RETRY_ON_EMPTY mechanism to work around problems
     with some load balancer configurations.

@@ -1,6 +1,6 @@
 package DBD::Gofer::Transport::http;
 
-#   $Id: http.pm 10066 2007-10-10 11:31:30Z timbo $
+#   $Id: http.pm 10068 2007-10-10 15:36:00Z timbo $
 #
 #   Copyright (c) 2007, Tim Bunce, Ireland
 #
@@ -21,7 +21,7 @@ use base qw(DBD::Gofer::Transport::Base);
 # set $DBI::stderr if unset (ie for older versions of DBI)
 $DBI::stderr ||= 2_000_000_000;
 
-our $VERSION = sprintf("0.%06d", q$Revision: 10066 $ =~ /(\d+)/o);
+our $VERSION = sprintf("0.%06d", q$Revision: 10068 $ =~ /(\d+)/o);
 
 __PACKAGE__->mk_accessors(qw(
     http_req
@@ -34,8 +34,10 @@ sub transmit_request_by_transport {
     my ($self, $request) = @_;
 
     my $retry_on_empty_response = 0;
-    $retry_on_empty_response = ($request->is_idempotent) ? 30 : 2
-	if $use_retry_on_empty_response;
+    if ($use_retry_on_empty_response) {
+        $retry_on_empty_response = ($request->is_idempotent) ? 10 : 1;
+        $retry_on_empty_response *= $use_retry_on_empty_response; # scalaing factor
+    }
 
     my $response = eval { 
         my $frozen_request = $self->freeze_request($request);
@@ -81,7 +83,7 @@ sub transmit_request_by_transport {
 
 	    if ($code == 500
 	    && $msg =~ m/^Server (closed connection without sending|returned empty response)/
-	    && $retry_on_empty_response-- >= 0
+	    && $retry_on_empty_response-- > 0
 	    ) {
 		my $msg = "$code $msg from ".$self->go_url;
 		warn "$msg ($retry_on_empty_response)\n";
@@ -192,8 +194,11 @@ standing connections enabled) which cause some requests to fail whithout ever
 reaching the gofer server.
 
 If set to 1 then empty responses will be retried. If is_idempotent() is true
-then upto 30 retries will be performed, else just 2 retries. The retries happen
+then upto 20 retries will be performed, else just 1 retry. The retries happen
 without any delay and log a warning each time.
+
+If set to a higher value then the retry counts are multiplied by that amount,
+so a value of 3 will retry idempotent requests 30 times, for example.
 
 This mechanism is not recommended for non-readonly databases because there's a
 risk that the server did receive and act on the request, so retrying it would
