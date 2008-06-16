@@ -1,6 +1,6 @@
 package DBD::Gofer::Transport::http;
 
-#   $Id: http.pm 10068 2007-10-10 15:36:00Z timbo $
+#   $Id: http.pm 11436 2008-06-16 21:51:33Z timbo $
 #
 #   Copyright (c) 2007, Tim Bunce, Ireland
 #
@@ -9,6 +9,8 @@ package DBD::Gofer::Transport::http;
 
 use strict;
 use warnings;
+
+our $VERSION = 1.015; # keep in sync with Makefile.PL
 
 use Carp;
 use URI;
@@ -21,22 +23,23 @@ use base qw(DBD::Gofer::Transport::Base);
 # set $DBI::stderr if unset (ie for older versions of DBI)
 $DBI::stderr ||= 2_000_000_000;
 
-our $VERSION = sprintf("0.%06d", q$Revision: 10068 $ =~ /(\d+)/o);
-
 __PACKAGE__->mk_accessors(qw(
     http_req
     http_ua
 )); 
 
-my $use_retry_on_empty_response = $ENV{DBD_GOFER_RETRY_ON_EMPTY} || 0;
+our $RETRY_DELAY_INIT = 0.2; # initial delay is actually scaled by RETRY_BACKOFF_SCALE first
+our $RETRY_BACKOFF_SCALE = 2;
+our $RETRY_ON_EMPTY_SCALE = $ENV{DBD_GOFER_RETRY_ON_EMPTY} || 0;
+
 
 sub transmit_request_by_transport {
     my ($self, $request) = @_;
 
     my $retry_on_empty_response = 0;
-    if ($use_retry_on_empty_response) {
+    if ($RETRY_ON_EMPTY_SCALE) {
         $retry_on_empty_response = ($request->is_idempotent) ? 10 : 1;
-        $retry_on_empty_response *= $use_retry_on_empty_response; # scalaing factor
+        $retry_on_empty_response *= $RETRY_ON_EMPTY_SCALE; # scalaing factor
     }
 
     my $response = eval { 
@@ -93,6 +96,10 @@ sub transmit_request_by_transport {
             return DBI::Gofer::Response->new({
                 err    => $DBI::stderr + $code,
                 errstr => "$code $msg",
+                meta => {   # extra info for response_needs_retransmit (below)
+                    http_status => $code,
+                    http_response => $res,
+                }
             }); 
         }
 
@@ -110,17 +117,27 @@ sub receive_response_by_transport {
     croak "receive_response_by_transport should never be called";
 }
 
-{
-    package # hide from pause indexer
-	LWP::Protocol::http::Socket;
 
-    sub XXX_read_response_headers {
-	my $self = shift;
-	my %args = @_;
-	delete $args{laxed};
-	warn "read_response_headers";
-	return $self->SUPER::read_response_headers(%args);
+sub response_retry_preference {
+    my $self = shift;
+    my ($request, $response) = @_;
+
+    my $response_meta = $response->meta;
+    my $http_status = $response_meta->{http_status} || 0;
+    if ($http_status == 503) {
+        # we assume for 503 that the request has not been executed
+        # so we don't check if $request->is_idempotent
+        return sub {
+            my $request_meta = $request->meta;
+            # delay before retry, with exponential backoff
+            my $delay = (($request_meta->{retry_delay} ||= $RETRY_DELAY_INIT) *= $RETRY_BACKOFF_SCALE);
+            $self->trace_msg("delaying $delay seconds before retry after $http_status error\n");
+            select(undef, undef, undef, $delay);
+            return;
+        };
     }
+
+    return $self->SUPER::response_retry_preference(@_);
 }
 
 

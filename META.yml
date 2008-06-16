@@ -1,16 +1,18 @@
-# http://module-build.sourceforge.net/META-spec.html
-#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
-name:         GoferTransport-http
-version:      1.014
-version_from: 
-installdirs:  site
-requires:
-    Apache::Util:                  0
-    DBI:                           1.56
+--- #YAML:1.0
+name:                GoferTransport-http
+version:             1.015
+abstract:            HTTP transport for DBI stateless proxy driver DBD::Gofer
+license:             ~
+author:              
+    - Tim Bunce <Tim.Bunce@pobox.com>
+generated_by:        ExtUtils::MakeMaker version 6.42
+distribution_type:   module
+requires:     
+    DBI:                           1.605
     HTTP::Request:                 0
     LWP::UserAgent:                0
     Test::More:                    0
     URI:                           0
-
-distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.17
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
+    version: 1.3

@@ -2,19 +2,25 @@ use strict;
 use warnings;
 use ExtUtils::MakeMaker;
 
+unless (eval { require Apache::Constants }
+     or eval { require Apache2::Const    }) {
+    warn "Can't load Apache::Constants or Apache2::Const module.\n";
+    warn "So I'm aborting as I presume you don't have mod_perl installed.\n".
+    exit 0;
+}
+
 WriteMakefile(
+    VERSION             => '1.015', # XXX update lib/DB?/Gofer/Transport/*pm
     NAME                => 'GoferTransport-http',
     AUTHOR              => 'Tim Bunce <Tim.Bunce@pobox.com>',
-    VERSION             => '1.014',
-    ABSTRACT            => 'HTTP transports for DBI stateless proxy driver DBD::Gofer',
+    ABSTRACT            => 'HTTP transport for DBI stateless proxy driver DBD::Gofer',
     PL_FILES            => {},
     PREREQ_PM => {
         'Test::More'    => 0,
-        DBI             => 1.56,
+        DBI             => 1.605,
         URI             => 0,
         'LWP::UserAgent'=> 0,
         'HTTP::Request' => 0,
-        'Apache::Util'  => 0, # really just saying 'needs mod_perl'
     },
     dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean               => { FILES => 'GoferTransport-http-*' },
