@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                GoferTransport-http
-version:             1.015
+version:             1.016
 abstract:            HTTP transport for DBI stateless proxy driver DBD::Gofer
 license:             ~
 author:              

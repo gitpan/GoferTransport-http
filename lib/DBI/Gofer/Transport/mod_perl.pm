@@ -3,7 +3,7 @@ package DBI::Gofer::Transport::mod_perl;
 use strict;
 use warnings;
 
-our $VERSION = 1.015; # keep in sync with Makefile.PL
+our $VERSION = 1.016; # keep in sync with Makefile.PL
 
 use UNIVERSAL qw(can);
 use Sys::Hostname qw(hostname);
@@ -537,6 +537,8 @@ to connect to databases via your apache httpd.
 
 =head1 CONFIGURATION
 
+=head2 Gofer Configuration
+
 Rather than provide a DBI proxy that will connect to any database as any user,
 you may well want to restrict access to just one or a few databases.
 
@@ -596,6 +598,14 @@ That approach can also provide a level of indirection by avoiding the need for
 the clients to know and use the actual DSN. The clients can just connect to the
 specific gofer url with an empty DSN. This means you can change the DSN being used
 without having to update the clients.
+
+=head2 Apache Configuration
+
+=head3 KeepAlive
+
+The gofer http transport will use HTTP/1.1 persistent connections if possible.
+You may want to tune the server-side settings KeepAlive, keepAliveTimeout, and
+MaxKeepAliveRequests.
 
 =head1 Apache::Status
 

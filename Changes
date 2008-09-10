@@ -4,16 +4,29 @@ Changes - List of significant changes to GoferTransport-http
     
 As of $Date: 2007-03-23 13:48:54 +0000 (Fri, 23 Mar 2007) $
 
-$Revision: 11432 $
+$Revision: 11760 $
 
 =cut
 
 Add retry_delay & retry_scale as transport attributes
 or better to move to DBI transport base class
 
-=head2 Changes in 1.015 (svn rev XXX), XXX
-
 Add perl-status ui to recent_errors queue
+
+Add more/clearer docs re configuration
+
+Add note about HTTP::Engine - perhaps someone could contribute a driver that
+uses it. Would probably want to refactor out parts of the mod_perl transport.
+
+=head2 Changes in 1.016 (svn rev 11760), 10th September 2008
+
+  Enabled use of http persistent-connections by default
+    which give significant performance boost by reducing latency.
+  Allow build to continue even if mod_perl can't be found.
+  Client now warns when retring request afer receiving a 503.
+  Documented some env vars that influence retry-on-503 behaviour.
+
+=head2 Changes in 1.015 (svn rev 11432), 16th June 2008
 
   Requires DBI 1.605
 
@@ -47,7 +60,7 @@ Add perl-status ui to recent_errors queue
 
   Fix for mod_perl2
 
-=head2 Changes in 1.0.0 (svn rev XX),  XXX
+=head2 Changes in 1.0.0
 
   Initial release.
 

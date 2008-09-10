@@ -1,6 +1,6 @@
 package DBD::Gofer::Transport::http;
 
-#   $Id: http.pm 11436 2008-06-16 21:51:33Z timbo $
+#   $Id: http.pm 11760 2008-09-10 10:24:55Z timbo $
 #
 #   Copyright (c) 2007, Tim Bunce, Ireland
 #
@@ -10,7 +10,7 @@ package DBD::Gofer::Transport::http;
 use strict;
 use warnings;
 
-our $VERSION = 1.015; # keep in sync with Makefile.PL
+our $VERSION = 1.016; # keep in sync with Makefile.PL
 
 use Carp;
 use URI;
@@ -28,9 +28,28 @@ __PACKAGE__->mk_accessors(qw(
     http_ua
 )); 
 
-our $RETRY_DELAY_INIT = 0.2; # initial delay is actually scaled by RETRY_BACKOFF_SCALE first
-our $RETRY_BACKOFF_SCALE = 2;
-our $RETRY_ON_EMPTY_SCALE = $ENV{DBD_GOFER_RETRY_ON_EMPTY} || 0;
+# (XXX All this rety logic should move into core gofer transport base classes)
+# INitial delay is actually scaled by RETRY_BACKOFF_SCALE first
+our $RETRY_DELAY_INIT     = $ENV{DBD_GOFER_RETRY_DELAY_INIT}    || 0.2;
+our $RETRY_BACKOFF_SCALE  = $ENV{DBD_GOFER_RETRY_BACKOFF_SCALE} || 2;
+our $RETRY_ON_EMPTY_SCALE = $ENV{DBD_GOFER_RETRY_ON_EMPTY}      || 0;
+our $RETRY_WARN           = $ENV{DBD_GOFER_RETRY_WARN}          || 1;
+
+our $CONN_CACHE = $ENV{DBD_GOFER_CONN_CACHE}; # set to 0 to disable
+# default to 10, though as the cache is per transport object it'll probably
+# never have more than one connection in it.
+$CONN_CACHE = 10 unless defined $CONN_CACHE;
+
+
+sub discard_cached_connections { # custom method for http transport
+    my $self = shift;
+    my $http_ua = $self->{http_ua} or return;
+    my $conn_cache = $http_ua->conn_cache or return;
+    #my $pre = $conn_cache->get_connections;
+    $conn_cache->drop;
+    #warn "discard_cached_connections $pre->".$conn_cache->get_connections;
+    return;
+}
 
 
 sub transmit_request_by_transport {
@@ -54,6 +73,7 @@ sub transmit_request_by_transport {
         my $http_ua = $self->{http_ua} ||= do {
             my $useragent = LWP::UserAgent->new(
                 timeout => $self->go_timeout,   # undef by default
+                keep_alive => $CONN_CACHE, # sets total_capacity of LWP::ConnCache
                 env_proxy => 1, # XXX
             );
             $useragent->agent(join "/", __PACKAGE__, $DBI::VERSION, $VERSION);
@@ -89,7 +109,7 @@ sub transmit_request_by_transport {
 	    && $retry_on_empty_response-- > 0
 	    ) {
 		my $msg = "$code $msg from ".$self->go_url;
-		warn "$msg ($retry_on_empty_response)\n";
+		warn "$msg ($retry_on_empty_response retry left)\n" if $RETRY_WARN;
 		goto SEND_REQUEST;
 	    }
 
@@ -131,7 +151,8 @@ sub response_retry_preference {
             my $request_meta = $request->meta;
             # delay before retry, with exponential backoff
             my $delay = (($request_meta->{retry_delay} ||= $RETRY_DELAY_INIT) *= $RETRY_BACKOFF_SCALE);
-            $self->trace_msg("delaying $delay seconds before retry after $http_status error\n");
+            my $msg = "Gofer delaying $delay seconds before retry after $http_status error\n";
+            ($RETRY_WARN) ? warn($msg) : $self->trace_msg($msg);
             select(undef, undef, undef, $delay);
             return;
         };
@@ -202,7 +223,52 @@ Waits for and returns response. Any exception is caught and returned as a respon
 This method isn't used because transmit_request_by_transport() always returns a response object.
 If called it throws an exception.
 
+=head2 response_retry_preference
+
+  $retry = $transport->response_retry_preference($request, $response);
+
+The response_retry_preference is called by DBD::Gofer when considering if a
+request should be retried after an error.
+
+Returns true (would like to retry), false (must not retry), undef (no preference).
+
+If a true value is returned in the form of a CODE ref then, if DBD::Gofer does
+decide to retry the request, it calls the code ref passing $retry_count, $retry_limit.
+Currently the called code must return using C<return;>.
+
+=head2 discard_cached_connections
+
+  $transport->discard_cached_connections();
+
+Drops any persistent-connections associated with the transport.
+
 =head1 ENVIRONMENT VARIABLES
+
+These environment variables are not considered a stable part of the interface
+and they may change between releases. (The general plan is for corresponding
+gofer transport attributes to be added. That would enable per-handle
+configuration. Patches welcome.)
+
+=head2 DBD_GOFER_CONN_CACHE
+
+Specifies the size of the persistent-conection cache for the transport object.
+Default is 10. Set to 0 to disable use of HTTP/1.1 persistent-conections.
+
+=head2 DBD_GOFER_RETRY_WARN
+
+Emit a warn() whenever a request is retried.
+
+=head2 DBD_GOFER_RETRY_BACKOFF_SCALE
+
+Specifies the amount to multiply the retry delay by on each retry.
+Default value 2.
+
+=head2 DBD_GOFER_RETRY_DELAY_INIT
+
+Initial delay, in seconds, before retrying after a request receives a 503
+response. (The DBD_GOFER_RETRY_BACKOFF_SCALE is applied first, so the actual
+initial delay is this value multipled by DBD_GOFER_RETRY_BACKOFF_SCALE).
+Default value 0.2.
 
 =head2 DBD_GOFER_RETRY_ON_EMPTY
 
