@@ -3,7 +3,7 @@ package DBI::Gofer::Transport::mod_perl;
 use strict;
 use warnings;
 
-our $VERSION = 1.016; # keep in sync with Makefile.PL
+our $VERSION = 1.017; # keep in sync with Makefile.PL
 
 use UNIVERSAL qw(can);
 use Sys::Hostname qw(hostname);
@@ -178,28 +178,28 @@ sub handler : method {
         $http_status = $action->($r, $error, $http_status, $default_action);
     }
 
-    # defer stats until the cleanup phase
-    $r->push_handlers('PerlCleanupHandler', sub {
+    my $update_stats_sub = sub {
         $executor->update_stats(
             $request,   # may not be defined if error thawing
             $response,  # always present
             # if we've used a non-default serializer (ie Data::Dumper)
             # then don't store the frozen items because we may not
-            # be able to thaw it. XXX needs better approach
+            # be able to thaw it. (XXX needs better approach
+            # such as also storing the serializer refs)
             ($request_serializer ) ? undef : $frozen_request,
             ($response_serializer) ? undef : $frozen_response,
             $time_received,
-            {
-                from => $remote_ip,
-            },
-            {
-                r => $r,
-                transport => $transport,
-            },
+            { from => $remote_ip, },
+            { r => $r, transport => $transport, },
         ) if $executor;
 
         return DECLINED;
-    });
+    };
+
+    # Defer stats until the cleanup phase
+    # (push_handlers PerlCleanupHandler works but leaks under MP2)
+    (MP2) ? $r->pool->cleanup_register( $update_stats_sub )
+          : $r->push_handlers('PerlCleanupHandler', $update_stats_sub );
 
     return $http_status;
 }

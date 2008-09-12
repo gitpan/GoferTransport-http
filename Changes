@@ -4,7 +4,7 @@ Changes - List of significant changes to GoferTransport-http
     
 As of $Date: 2007-03-23 13:48:54 +0000 (Fri, 23 Mar 2007) $
 
-$Revision: 11760 $
+$Revision: 11766 $
 
 =cut
 
@@ -17,6 +17,10 @@ Add more/clearer docs re configuration
 
 Add note about HTTP::Engine - perhaps someone could contribute a driver that
 uses it. Would probably want to refactor out parts of the mod_perl transport.
+
+=head2 Changes in 1.017 (svn rev 11766), 12th September 2008
+
+  Fixed a memory leak in mod_perl2 by avoiding $r->push_handlers().
 
 =head2 Changes in 1.016 (svn rev 11760), 10th September 2008
 

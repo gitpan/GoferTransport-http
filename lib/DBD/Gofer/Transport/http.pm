@@ -1,6 +1,6 @@
 package DBD::Gofer::Transport::http;
 
-#   $Id: http.pm 11760 2008-09-10 10:24:55Z timbo $
+#   $Id: http.pm 11766 2008-09-12 12:23:47Z timbo $
 #
 #   Copyright (c) 2007, Tim Bunce, Ireland
 #
@@ -10,7 +10,7 @@ package DBD::Gofer::Transport::http;
 use strict;
 use warnings;
 
-our $VERSION = 1.016; # keep in sync with Makefile.PL
+our $VERSION = 1.017; # keep in sync with Makefile.PL
 
 use Carp;
 use URI;
